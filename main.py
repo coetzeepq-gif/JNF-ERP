@@ -5,7 +5,7 @@ from datetime import datetime
 
 # --- 1. DATABASE ENGINE ---
 def get_connection():
-    return sqlite3.connect('jnf_elect_PRO_v25.db', check_same_thread=False)
+    return sqlite3.connect('jnf_elect_FINAL_WORKHORSE.db', check_same_thread=False)
 
 def init_db():
     conn = get_connection()
@@ -22,143 +22,124 @@ def init_db():
 
 init_db()
 
-# --- 2. INTERFACE ---
-st.set_page_config(page_title="JNF Master ERP v25", layout="wide")
+# --- 2. NAVIGATION ---
+st.set_page_config(page_title="JNF Master ERP", layout="wide")
 st.sidebar.title("⚡ JNF COMMAND")
-menu = ["📊 Executive Dashboard", "🏗️ Project Site Manager", "📦 Stores Control"]
+menu = ["📊 Executive Dashboard", "📋 Blueprint Library", "🏗️ Project Site Manager", "📦 Stores Control"]
 choice = st.sidebar.radio("Navigation", menu)
 
-# --- 3. DASHBOARD ---
+# --- 3. EXECUTIVE DASHBOARD ---
 if choice == "📊 Executive Dashboard":
-    st.header("Site Progress Dashboard")
+    st.header("Site Progress & Unit Material Lists")
     conn = get_connection()
-    projects = pd.read_sql_query("SELECT * FROM projects", conn)
+    projects = pd.read_sql_query("SELECT * FROM projects ORDER BY id DESC", conn)
     
     for _, p in projects.iterrows():
         with st.container(border=True):
-            st.subheader(f"Project: {p['name']}")
+            st.subheader(f"🏗️ Project: {p['name']}")
             u_df = pd.read_sql_query(f"""
-                SELECT u.unit_no, b.name as b_type, (u.first_fix + u.piping + u.wiring + u.fitting + u.testing) as progress
+                SELECT u.*, b.name as b_type 
                 FROM units u JOIN blueprints b ON u.blueprint_id = b.id 
                 WHERE u.project_id={p['id']}""", conn)
             
             if u_df.empty:
-                st.info("No units on site yet.")
+                st.info("No units linked. Go to 'Project Site Manager' to add units.")
             else:
-                st.dataframe(u_df, use_container_width=True, hide_index=True)
-
-# --- 4. PROJECT SITE MANAGER (THE ALL-IN-ONE HUB) ---
-elif choice == "🏗️ Project Site Manager":
-    st.header("Project Site Operations")
-    conn = get_connection()
-    
-    # Create Project
-    with st.container(border=True):
-        p_name = st.text_input("Launch New Project Site")
-        if st.button("Initialize Site"):
-            if p_name:
-                conn.execute("INSERT OR IGNORE INTO projects (name) VALUES (?)", (p_name,))
-                conn.commit()
-                st.rerun()
-
-    st.divider()
-    
-    projs = pd.read_sql_query("SELECT * FROM projects ORDER BY id DESC", conn)
-    for _, p in projs.iterrows():
-        with st.expander(f"📂 SITE: {p['name']}", expanded=True):
-            
-            tab1, tab2, tab3 = st.tabs(["📋 Design Blueprints", "🏗️ Unit Tracking & Extras", "📚 Site Blueprint Library"])
-            
-            # --- TAB 1: DESIGN ---
-            with tab1:
-                st.write("### Create New Blueprint")
-                bn = st.text_input("Blueprint Name", key=f"bn_{p['id']}")
-                if st.button("Save Blueprint", key=f"bsb_{p['id']}"):
-                    if bn:
-                        conn.execute("INSERT INTO blueprints (project_id, name) VALUES (?,?)", (p['id'], bn))
-                        conn.commit()
-                        st.rerun()
-
-            # --- TAB 2: UNIT TRACKING ---
-            with tab2:
-                st.write("### Link Unit/Yard to Site")
-                c1, c2, c3 = st.columns([2,2,1])
-                u_no = c1.text_input("Unit No", key=f"u_{p['id']}")
-                bls = pd.read_sql_query(f"SELECT * FROM blueprints WHERE project_id={p['id']}", conn)
-                u_bl = c2.selectbox("Assign Blueprint", bls['name'] if not bls.empty else ["None"], key=f"ub_{p['id']}")
-                
-                if c3.button("Link Unit", key=f"lu_{p['id']}"):
-                    if not bls.empty and u_no:
-                        bid = bls[bls['name'] == u_bl]['id'].values[0]
-                        conn.execute("INSERT INTO units (project_id, unit_no, blueprint_id) VALUES (?,?,?)", (p['id'], u_no, bid))
-                        conn.commit()
-                        st.rerun()
-                
-                st.divider()
-                st.write("### Active Units & Progress")
-                # THE UNIT LIST YOU WERE MISSING
-                units = pd.read_sql_query(f"""
-                    SELECT u.*, b.name as b_type FROM units u 
-                    JOIN blueprints b ON u.blueprint_id = b.id 
-                    WHERE u.project_id={p['id']}""", conn)
-                
-                for _, u in units.iterrows():
-                    with st.container(border=True):
-                        # Line 1: Unit ID and Blueprint Type
-                        st.write(f"**Unit {u['unit_no']}** — *Blueprint: {u['b_type']}*")
-                        # Line 2: The 5 Electrical Stages
-                        sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
-                        f1 = sc1.checkbox("1st Fix", value=u['first_fix'], key=f"f1_{u['id']}")
-                        f2 = sc2.checkbox("Piping", value=u['piping'], key=f"f2_{u['id']}")
-                        f3 = sc3.checkbox("Wiring", value=u['wiring'], key=f"f3_{u['id']}")
-                        f4 = sc4.checkbox("Fitting", value=u['fitting'], key=f"f4_{u['id']}")
-                        f5 = sc5.checkbox("Testing", value=u['testing'], key=f"f5_{u['id']}")
-                        if sc6.button("Update", key=f"upd_{u['id']}"):
-                            conn.execute(f"UPDATE units SET first_fix={int(f1)}, piping={int(f2)}, wiring={int(f3)}, fitting={int(f4)}, testing={int(f5)} WHERE id={u['id']}")
-                            conn.commit()
-                            st.rerun()
-
-            # --- TAB 3: SITE BLUEPRINT LIBRARY ---
-            with tab3:
-                st.write(f"### Existing Blueprints for {p['name']}")
-                if bls.empty:
-                    st.info("No blueprints designed for this site yet.")
-                else:
-                    for _, b in bls.iterrows():
-                        with st.expander(f"Blueprint: {b['name']}"):
-                            # Add Material to existing blueprint
-                            mc1, mc2, mc3, mc4 = st.columns([3,1,1,1])
-                            m_it = mc1.text_input("Material", key=f"mi_{b['id']}")
-                            m_qt = mc2.number_input("Qty", min_value=0.0, key=f"mq_{b['id']}")
-                            m_um = mc3.selectbox("Unit", ["Units", "Meters", "Rolls"], key=f"mu_{b['id']}")
-                            if mc4.button("Add", key=f"ma_{b['id']}"):
-                                conn.execute("INSERT INTO blueprint_items (b_id, item, qty, uom) VALUES (?,?,?,?)", (b['id'], m_it, m_qt, m_um))
+                u_cols = st.columns(2)
+                for i, u in u_df.iterrows():
+                    with u_cols[i % 2]:
+                        with st.expander(f"UNIT {u['unit_no']} - Type: {u['b_type']}", expanded=False):
+                            st.write("**Electrical Progress:**")
+                            c1, c2, c3, c4, c5, c6 = st.columns(6)
+                            ff = c1.checkbox("1st Fix", value=u['first_fix'], key=f"ff_{u['id']}")
+                            pp = c2.checkbox("Piping", value=u['piping'], key=f"pp_{u['id']}")
+                            ww = c3.checkbox("Wiring", value=u['wiring'], key=f"ww_{u['id']}")
+                            ft = c4.checkbox("Fitting", value=u['fitting'], key=f"ft_{u['id']}")
+                            tt = c5.checkbox("Test", value=u['testing'], key=f"tt_{u['id']}")
+                            if c6.button("Save", key=f"sv_{u['id']}"):
+                                conn.execute(f"UPDATE units SET first_fix={int(ff)}, piping={int(pp)}, wiring={int(ww)}, fitting={int(ft)}, testing={int(tt)} WHERE id={u['id']}")
                                 conn.commit()
                                 st.rerun()
                             
-                            # Show the Quote List
-                            items = pd.read_sql_query(f"""
-                                SELECT bi.id, bi.item, bi.qty, bi.uom, IFNULL(s.price, 0) as rate, (bi.qty * IFNULL(s.price, 0)) as total 
-                                FROM blueprint_items bi LEFT JOIN stores s ON bi.item = s.item WHERE bi.b_id = {b['id']}""", conn)
-                            if not items.empty:
-                                st.table(items.drop(columns=['id']))
-                                if st.button(f"🗑️ Delete {b['name']}", key=f"db_{b['id']}"):
-                                    conn.execute(f"DELETE FROM blueprint_items WHERE b_id={b['id']}")
-                                    conn.execute(f"DELETE FROM blueprints WHERE id={b['id']}")
-                                    conn.commit()
-                                    st.rerun()
+                            st.write("---")
+                            st.write("**Material Bill of Quantities:**")
+                            m_df = pd.read_sql_query(f"""
+                                SELECT bi.item, bi.qty, bi.uom, IFNULL(s.price, 0) as price, (bi.qty * IFNULL(s.price, 0)) as total
+                                FROM blueprint_items bi LEFT JOIN stores s ON bi.item = s.item 
+                                WHERE bi.b_id = {u['blueprint_id']}""", conn)
+                            st.table(m_df)
+                            st.write(f"**Total Unit Value:** R {m_df['total'].sum():,.2f}")
 
-# --- 5. STORES CONTROL ---
+# --- 4. BLUEPRINT LIBRARY ---
+elif choice == "📋 Blueprint Library":
+    st.header("Master Blueprint Editor")
+    conn = get_connection()
+    all_b = pd.read_sql_query("SELECT b.id, b.name, p.name as proj FROM blueprints b JOIN projects p ON b.project_id = p.id", conn)
+    
+    if not all_b.empty:
+        sel_b = st.selectbox("Select Blueprint to Edit", all_b['name'] + " [" + all_b['proj'] + "]")
+        bid = all_b[all_b['name'] + " [" + all_b['proj'] + "]" == sel_b]['id'].values[0]
+        
+        st.write("### Add Material Line")
+        c1, c2, c3, c4 = st.columns([3,1,1,1])
+        m_it = c1.text_input("Item")
+        m_qt = c2.number_input("Qty", min_value=0.0)
+        m_um = c3.selectbox("UOM", ["Units", "Meters", "Rolls", "Boxes"])
+        if c4.button("Add Item"):
+            conn.execute("INSERT INTO blueprint_items (b_id, item, qty, uom) VALUES (?,?,?,?)", (bid, m_it, m_qt, m_um))
+            conn.commit()
+            st.rerun()
+            
+        items = pd.read_sql_query(f"SELECT * FROM blueprint_items WHERE b_id = {bid}", conn)
+        st.table(items[['item', 'qty', 'uom']])
+        for _, r in items.iterrows():
+            if st.button(f"🗑️ Delete {r['item']}", key=f"del_{r['id']}"):
+                conn.execute(f"DELETE FROM blueprint_items WHERE id={r['id']}")
+                conn.commit()
+                st.rerun()
+
+# --- 5. PROJECT SITE MANAGER ---
+elif choice == "🏗️ Project Site Manager":
+    st.header("Site Setup")
+    conn = get_connection()
+    p_name = st.text_input("Project Name")
+    if st.button("Create Site"):
+        conn.execute("INSERT OR IGNORE INTO projects (name) VALUES (?)", (p_name,))
+        conn.commit()
+        st.rerun()
+
+    projects = pd.read_sql_query("SELECT * FROM projects", conn)
+    for _, p in projects.iterrows():
+        with st.expander(f"📂 SETUP: {p['name']}", expanded=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.write("**1. Create Blueprint**")
+                bn = st.text_input("Blueprint Name", key=f"bn_{p['id']}")
+                if st.button("Save Design", key=f"bs_{p['id']}"):
+                    conn.execute("INSERT INTO blueprints (project_id, name) VALUES (?,?)", (p['id'], bn))
+                    conn.commit()
+                    st.rerun()
+            with c2:
+                st.write("**2. Link Unit**")
+                un = st.text_input("Unit No", key=f"un_{p['id']}")
+                bls = pd.read_sql_query(f"SELECT * FROM blueprints WHERE project_id={p['id']}", conn)
+                ubl = st.selectbox("Design Type", bls['name'] if not bls.empty else ["None"], key=f"ub_{p['id']}")
+                if st.button("Link Unit", key=f"ul_{p['id']}"):
+                    bid = bls[bls['name'] == ubl]['id'].values[0]
+                    conn.execute("INSERT INTO units (project_id, unit_no, blueprint_id) VALUES (?,?,?)", (p['id'], un, bid))
+                    conn.commit()
+                    st.rerun()
+
+# --- 6. STORES CONTROL ---
 elif choice == "📦 Stores Control":
     st.header("Warehouse Inventory")
     conn = get_connection()
-    # [Previous working stores logic kept intact]
     c1, c2, c3, c4 = st.columns([3,1,1,1])
     s_it = c1.text_input("Material Name")
-    s_q = c2.number_input("Stock Qty", min_value=0.0)
-    s_p = c3.number_input("Unit Price", min_value=0.0)
+    s_q = c2.number_input("Stock Qty")
+    s_p = c3.number_input("Price")
     s_u = c4.selectbox("Unit", ["Units", "Meters", "Rolls", "Boxes"])
-    if st.button("Update Stores"):
+    if st.button("Update"):
         conn.execute("INSERT OR REPLACE INTO stores (item, available, price, uom) VALUES (?,?,?,?)", (s_it, s_q, s_p, s_u))
         conn.commit()
         st.rerun()
